@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Treemap tiles, colours = Color.hueForBranch(0...4) in TreemapView.swift -->
+  <rect x="192" y="192" width="368" height="640" rx="40" fill="#559DE0"/>
+  <rect x="584" y="192" width="248" height="300" rx="40" fill="#E09855"/>
+  <rect x="584" y="516" width="248" height="172" rx="40" fill="#55E063"/>
+  <rect x="584" y="712" width="112" height="120" rx="32" fill="#B455E0"/>
+  <rect x="720" y="712" width="112" height="120" rx="32" fill="#55E0CF"/>
+</svg>
