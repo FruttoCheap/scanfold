@@ -71,7 +71,7 @@ enum TreemapLayout {
 
             // A folder gets an outline container if it has space and children
             if isDir && rect.width >= 56 && rect.height >= 42 && !folderKids.isEmpty {
-                let headerHeight: CGFloat = 22
+                let headerHeight: CGFloat = 24
                 let outlineRect = rect.insetBy(dx: 2, dy: 2)
                 let headerRect = CGRect(x: outlineRect.minX + 2, y: outlineRect.minY + 2,
                                         width: max(0, outlineRect.width - 4), height: headerHeight)
@@ -299,154 +299,169 @@ struct TreemapView: View {
     @State private var hovered: Int?
     @State private var hoveredParentId: Int?
     @State private var canvasSize: CGSize = .zero
+    @State private var layoutID = 0
 
     var body: some View {
-        GeometryReader { geo in
-            Canvas { context, _ in
-                // 1. Draw Folder Outline Containers
-                for container in containers {
-                    let isHovered = (hovered == container.id) || (hoveredParentId == container.id)
-                    let outlinePath = Path(roundedRect: container.outlineRect, cornerRadius: 7)
+        Canvas { context, _ in
+            // 1. Draw Folder Outline Containers
+            for container in containers {
+                let isHovered = (hovered == container.id) || (hoveredParentId == container.id)
+                let outlinePath = Path(roundedRect: container.outlineRect, cornerRadius: 7)
 
-                    // Translucent background fill
-                    context.fill(outlinePath, with: .color(container.color.opacity(isHovered ? 0.20 : 0.08)))
+                // Translucent background fill
+                context.fill(outlinePath, with: .color(container.color.opacity(isHovered ? 0.20 : 0.08)))
 
-                    // Prominent Folder Outline
-                    if isHovered {
-                        context.stroke(outlinePath, with: .color(.white), lineWidth: 2.5)
-                    } else {
-                        context.stroke(outlinePath, with: .color(container.color.opacity(0.85)), lineWidth: 2.0)
+                // Prominent Folder Outline
+                if isHovered {
+                    context.stroke(outlinePath, with: .color(.white), lineWidth: 2.5)
+                } else {
+                    context.stroke(outlinePath, with: .color(container.color.opacity(0.85)), lineWidth: 2.0)
+                }
+
+                // Header Banner: 📁 FolderName  Size
+                let headerPath = Path(roundedRect: container.headerRect, cornerRadius: 5)
+                let headerFill = isHovered ? container.color.opacity(0.60) : container.color.opacity(0.35)
+                context.fill(headerPath, with: .color(headerFill))
+
+                if container.headerRect.width > 44 {
+                    // Size on the right when there is room; the name truncates before it instead of overlapping.
+                    let size = context.resolve(
+                        Text(VolumeInfo.fmt(container.size))
+                            .font(.caption2.weight(.medium))
+                            .foregroundColor(.white.opacity(0.9))
+                    )
+                    let sizeWidth = container.headerRect.width > 120
+                        ? size.measure(in: container.headerRect.size).width + 8 : 0
+                    if sizeWidth > 0 {
+                        context.draw(size, at: CGPoint(x: container.headerRect.maxX - 6, y: container.headerRect.midY),
+                                     anchor: .trailing)
                     }
+                    context.draw(
+                        Text("\(Image(systemName: "folder.fill")) \(container.name)")
+                            .font(.callout.weight(isHovered ? .bold : .semibold))
+                            .foregroundColor(.white),
+                        in: CGRect(x: container.headerRect.minX + 6, y: container.headerRect.minY + 3,
+                                   width: max(0, container.headerRect.width - 12 - sizeWidth), height: 18)
+                    )
+                }
+            }
 
-                    // Header Banner: 📁 FolderName  Size
-                    let headerPath = Path(roundedRect: container.headerRect, cornerRadius: 5)
-                    let headerFill = isHovered ? container.color.opacity(0.60) : container.color.opacity(0.35)
-                    context.fill(headerPath, with: .color(headerFill))
+            // 2. Draw Child Tiles inside the containers
+            for tile in tiles {
+                let isHovered = tile.id == hovered
+                let path = Path(roundedRect: tile.rect, cornerRadius: 4)
 
-                    if container.headerRect.width > 44 {
+                context.fill(path, with: .color(isHovered ? tile.color.opacity(1.0) : tile.color))
+
+                if isHovered {
+                    context.stroke(path, with: .color(.white), lineWidth: 2)
+                } else {
+                    context.stroke(path, with: .color(.black.opacity(0.22)), lineWidth: 0.5)
+                }
+
+                // ponytail: only top-level items get a label; nested tiles show the subdivision, hover names them
+                if tile.parentFolderId == -1, tile.rect.width > 44, tile.rect.height > 18 {
+                    let name = tree.name(of: tile.id)
+                    context.draw(
+                        Text(name)
+                            .font(.caption.weight(isHovered ? .semibold : .medium))
+                            .foregroundColor(.white),
+                        in: CGRect(x: tile.rect.minX + 5, y: tile.rect.minY + 4, width: tile.rect.width - 10, height: 14)
+                    )
+                    if tile.rect.height > 34, tile.rect.width > 60 {
                         context.draw(
-                            Text("📁 \(container.name)")
-                                .font(.caption.weight(isHovered ? .bold : .semibold))
-                                .foregroundColor(.white),
-                            in: CGRect(x: container.headerRect.minX + 6, y: container.headerRect.minY + 3,
-                                       width: max(0, container.headerRect.width - 12), height: 16)
+                            Text(VolumeInfo.fmt(tree.size(of: tile.id)))
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.85)),
+                            in: CGRect(x: tile.rect.minX + 5, y: tile.rect.minY + 18, width: tile.rect.width - 10, height: 12)
                         )
-
-                        if container.headerRect.width > 120 {
-                            context.draw(
-                                Text(VolumeInfo.fmt(container.size))
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundColor(.white.opacity(0.9)),
-                                at: CGPoint(x: container.headerRect.maxX - 6, y: container.headerRect.midY),
-                                anchor: .trailing
-                            )
-                        }
-                    }
-                }
-
-                // 2. Draw Child Tiles inside the containers
-                for tile in tiles {
-                    let isHovered = tile.id == hovered
-                    let path = Path(roundedRect: tile.rect, cornerRadius: 4)
-
-                    context.fill(path, with: .color(isHovered ? tile.color.opacity(1.0) : tile.color))
-
-                    if isHovered {
-                        context.stroke(path, with: .color(.white), lineWidth: 2)
-                    } else {
-                        context.stroke(path, with: .color(.black.opacity(0.22)), lineWidth: 0.5)
-                    }
-
-                    if tile.rect.width > 44, tile.rect.height > 18 {
-                        let name = tree.name(of: tile.id)
-                        context.draw(
-                            Text(name)
-                                .font(.caption.weight(isHovered ? .semibold : .medium))
-                                .foregroundColor(.white),
-                            in: CGRect(x: tile.rect.minX + 5, y: tile.rect.minY + 4, width: tile.rect.width - 10, height: 14)
-                        )
-                        if tile.rect.height > 34, tile.rect.width > 60 {
-                            context.draw(
-                                Text(VolumeInfo.fmt(tree.size(of: tile.id)))
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.85)),
-                                in: CGRect(x: tile.rect.minX + 5, y: tile.rect.minY + 18, width: tile.rect.width - 10, height: 12)
-                            )
-                        }
                     }
                 }
             }
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let loc):
-                    // Leaf tiles take precedence
-                    if let hitTile = tiles.first(where: { $0.rect.contains(loc) }) {
-                        if hovered != hitTile.id {
-                            hovered = hitTile.id
-                            hoveredParentId = hitTile.parentFolderId >= 0 ? hitTile.parentFolderId : nil
-                            onHover(hitTile.id)
-                        }
-                    } else if let hitHeader = containers.first(where: { $0.headerRect.contains(loc) }) {
-                        if hovered != hitHeader.id {
-                            hovered = hitHeader.id
-                            hoveredParentId = hitHeader.id
-                            onHover(hitHeader.id)
-                        }
-                    } else if let hitContainer = containers.first(where: { $0.rect.contains(loc) }) {
-                        if hovered != hitContainer.id {
-                            hovered = hitContainer.id
-                            hoveredParentId = hitContainer.id
-                            onHover(hitContainer.id)
-                        }
-                    } else {
-                        if hovered != nil {
-                            hovered = nil
-                            hoveredParentId = nil
-                            onHover(nil)
-                        }
-                    }
-                case .ended:
-                    hovered = nil
-                    hoveredParentId = nil
-                    onHover(nil)
-                }
-            }
-            .onTapGesture { loc in
-                if let hitTile = tiles.first(where: { $0.rect.contains(loc) }) {
-                    onSelect(hitTile.id)
-                } else if let hitContainer = containers.first(where: { $0.headerRect.contains(loc) || $0.rect.contains(loc) }) {
-                    onSelect(hitContainer.id)
-                }
-            }
-            .contextMenu {
-                if let hit = hovered {
-                    if tree.isDir(of: hit) {
-                        Button("Open Folder") { onSelect(hit) }
-                    } else {
-                        Button("Quick Look") { onQuickLook(hit) }
-                    }
-                    Button("Add to Collector") { onCollect(hit) }
-                    Divider()
-                    if !tree.path(of: hit).isEmpty {
-                        Button("Show in Finder") { onShowInFinder(hit) }
-                    }
-                }
-            }
-            .onAppear { relayout(geo.size) }
-            .onChange(of: geo.size) { _, newSize in relayout(newSize) }
-            .onChange(of: current) { _, _ in relayout(canvasSize) }
-            .onChange(of: revision) { _, _ in relayout(canvasSize) }
         }
+        .contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let loc):
+                // Leaf tiles take precedence
+                if let hitTile = tiles.first(where: { $0.rect.contains(loc) }) {
+                    if hovered != hitTile.id {
+                        hovered = hitTile.id
+                        hoveredParentId = hitTile.parentFolderId >= 0 ? hitTile.parentFolderId : nil
+                        onHover(hitTile.id)
+                    }
+                } else if let hitHeader = containers.first(where: { $0.headerRect.contains(loc) }) {
+                    if hovered != hitHeader.id {
+                        hovered = hitHeader.id
+                        hoveredParentId = hitHeader.id
+                        onHover(hitHeader.id)
+                    }
+                } else if let hitContainer = containers.first(where: { $0.rect.contains(loc) }) {
+                    if hovered != hitContainer.id {
+                        hovered = hitContainer.id
+                        hoveredParentId = hitContainer.id
+                        onHover(hitContainer.id)
+                    }
+                } else {
+                    if hovered != nil {
+                        hovered = nil
+                        hoveredParentId = nil
+                        onHover(nil)
+                    }
+                }
+            case .ended:
+                hovered = nil
+                hoveredParentId = nil
+                onHover(nil)
+            }
+        }
+        .onTapGesture { loc in
+            if let hitTile = tiles.first(where: { $0.rect.contains(loc) }) {
+                onSelect(hitTile.id)
+            } else if let hitContainer = containers.first(where: { $0.headerRect.contains(loc) || $0.rect.contains(loc) }) {
+                onSelect(hitContainer.id)
+            }
+        }
+        .contextMenu {
+            if let hit = hovered {
+                if tree.isDir(of: hit) {
+                    Button("Open Folder") { onSelect(hit) }
+                } else {
+                    Button("Quick Look") { onQuickLook(hit) }
+                }
+                Button("Add to Collector") { onCollect(hit) }
+                Divider()
+                if !tree.path(of: hit).isEmpty {
+                    Button("Show in Finder") { onShowInFinder(hit) }
+                }
+            }
+        }
+        // Drag the block under the cursor (e.g. into the Collector); -1 = nothing hovered, ignored on drop.
+        .draggable(NodeRef(index: hovered ?? -1)) {
+            if let h = hovered {
+                Label(tree.name(of: h), systemImage: tree.isDir(of: h) ? "folder.fill" : "doc.fill")
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+            }
+        }
+        // Tracks layout directly; onChange(of: geo.size) could miss the final window size at launch.
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { relayout($0) }
+        .onChange(of: current) { _, _ in relayout(canvasSize) }
+        .onChange(of: revision) { _, _ in relayout(canvasSize) }
     }
 
     private func relayout(_ size: CGSize) {
         canvasSize = size
+        layoutID += 1
+        let id = layoutID
         let snapshot = tree
         let root = current
         Task.detached(priority: .userInitiated) {
             let res = TreemapLayout.compute(tree: snapshot, root: root, size: size)
             await MainActor.run {
+                // Layouts run in parallel: a stale one finishing last must not overwrite the newest.
+                guard id == self.layoutID else { return }
                 self.containers = res.containers
                 self.tiles = res.tiles
             }
@@ -502,25 +517,10 @@ struct TreemapInspectorBar: View {
                         .truncationMode(.middle)
                 }
             } else {
-                Image(systemName: "folder.fill")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Text(tree.name(of: current).isEmpty ? tree.path(of: current) : tree.name(of: current))
-                    .fontWeight(.medium)
-                Text("•")
+                Image(systemName: "cursorarrow.rays")
                     .foregroundStyle(.tertiary)
-                Text(VolumeInfo.fmt(tree.size(of: current)))
-                    .font(.system(.body, design: .monospaced))
-
-                if tree.fileCount(of: current) > 0 {
-                    Text("•")
-                        .foregroundStyle(.tertiary)
-                    Text("\(tree.fileCount(of: current)) items")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("Hover or click a block to inspect")
+                    .frame(width: 16)
+                Text("Hover a block to inspect it, click to open")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

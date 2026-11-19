@@ -15,12 +15,14 @@ final class AppModel: ObservableObject {
     @Published var collected: [Int] = []
     @Published var showDeleteConfirmation = false
     @Published var quickLookURL: URL?
+    let hasDiskAccess: Bool
 
     private var scanner: Scanner?
     private var scanTask: Task<Void, Never>?
 
     init() {
-        checkDiskAccess()
+        // TCC.db exists on every Mac and opens only with Full Disk Access. macOS applies a new grant on relaunch.
+        hasDiskAccess = FileHandle(forReadingAtPath: "/Library/Application Support/com.apple.TCC/TCC.db") != nil
         volumeInfo = VolumeInfo.forRootVolume()
         if let cached = ScanStorage.load() {
             self.tree = cached.tree
@@ -30,13 +32,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The app needs Full Disk Access to read protected folders.
-    func checkDiskAccess() {
-        let mail = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Mail")
-        if !FileManager.default.isReadableFile(atPath: mail.path) {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                NSWorkspace.shared.open(url)
-            }
+    func openDiskAccessSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -62,7 +60,7 @@ final class AppModel: ObservableObject {
 
         Task {
             let result = await scanner.scan()
-            guard !Task.isCancelled else { return }
+            guard !scanner.isCancelled else { return }   // Stop keeps the previous result
             self.tree = result.tree
             self.current = result.tree.root
             self.errorCount = result.errors
@@ -75,7 +73,7 @@ final class AppModel: ObservableObject {
     func cancelScan() {
         scanTask?.cancel()
         scanTask = nil
-        Task { await scanner?.cancel() }
+        scanner?.cancel()
         isScanning = false
     }
 
@@ -101,24 +99,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func navigateUp() {
-        navigate(to: -1)
-    }
-
-    var canNavigateUp: Bool {
-        guard let tree else { return false }
-        return current != tree.root
-    }
-
     // MARK: - Volume
-
-    /// Space used by the system that the scan could not see.
-    var hiddenSpace: UInt64 {
-        guard let v = volumeInfo, let tree else { return 0 }
-        let used = v.usedSpace
-        let scanned = tree.size(of: tree.root)
-        return used > scanned ? used - scanned : 0
-    }
 
     var scannedSize: UInt64 {
         guard let tree else { return 0 }
@@ -144,7 +125,7 @@ final class AppModel: ObservableObject {
     // MARK: - Collector
 
     func addToCollector(_ index: Int) {
-        guard let tree else { return }
+        guard let tree, tree.nodes.indices.contains(index) else { return }   // -1 = empty drag
         guard tree.path(of: index).isEmpty == false else { return }   // skip aggregates
         if !collected.contains(index) { collected.append(index) }
     }

@@ -94,15 +94,18 @@ final class Scanner: @unchecked Sendable {
         }
 
         tree.recomputeAllSizes()
+        finishProgress()
+        return Result(tree: tree, errors: errors, files: scanned)
+    }
 
+    /// Sends the final progress and closes the stream. Kept sync: os_unfair_lock can't be used from async code.
+    private func finishProgress() {
         os_unfair_lock_lock(&continuationLock)
         let cont = continuation
         os_unfair_lock_unlock(&continuationLock)
 
         cont?.yield(Progress(scanned: scanned, totalSize: totalSize, currentPath: rootPath, errors: errors))
         cont?.finish()
-
-        return Result(tree: tree, errors: errors, files: scanned)
     }
 
     private func runScan(rootDev: UInt32) {

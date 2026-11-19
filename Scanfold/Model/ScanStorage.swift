@@ -3,7 +3,7 @@ import Foundation
 /// Handles persistent caching of the last scan result.
 enum ScanStorage {
     private static let magic: UInt32 = 0x53434E46 // "SCNF"
-    private static let currentVersion: UInt32 = 1
+    private static let currentVersion: UInt32 = 2   // 2: dropped privateSize
     private static let queue = DispatchQueue(label: "com.giuliodesana.scanfold.storage", qos: .utility)
 
     struct SavedScan {
@@ -64,7 +64,7 @@ enum ScanStorage {
     static func serialize(nodes: [FileTree.Node], errorCount: Int, date: Date) -> Data {
         var estimatedSize = 32
         for n in nodes {
-            estimatedSize += 71 + n.name.utf8.count + n.path.utf8.count
+            estimatedSize += 63 + n.name.utf8.count + n.path.utf8.count
         }
 
         var data = Data(capacity: estimatedSize)
@@ -82,7 +82,6 @@ enum ScanStorage {
 
         for n in nodes {
             var alloc = n.allocSize
-            var priv = n.privateSize
             var p = Int64(n.parent)
             var fc = Int64(n.firstChild)
             var lc = Int64(n.lastChild)
@@ -92,7 +91,6 @@ enum ScanStorage {
             let flags: UInt8 = (n.isDir ? 1 : 0) | (n.isAggregate ? 2 : 0)
 
             withUnsafeBytes(of: &alloc) { data.append(contentsOf: $0) }
-            withUnsafeBytes(of: &priv) { data.append(contentsOf: $0) }
             withUnsafeBytes(of: &p) { data.append(contentsOf: $0) }
             withUnsafeBytes(of: &fc) { data.append(contentsOf: $0) }
             withUnsafeBytes(of: &lc) { data.append(contentsOf: $0) }
@@ -146,7 +144,6 @@ enum ScanStorage {
 
             for _ in 0..<count {
                 guard let alloc = readUnaligned(UInt64.self),
-                      let priv = readUnaligned(UInt64.self),
                       let p = readUnaligned(Int64.self),
                       let fc = readUnaligned(Int64.self),
                       let lc = readUnaligned(Int64.self),
@@ -175,7 +172,6 @@ enum ScanStorage {
                     name: name,
                     path: path,
                     allocSize: alloc,
-                    privateSize: priv,
                     parent: Int(p),
                     firstChild: Int(fc),
                     lastChild: Int(lc),

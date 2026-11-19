@@ -5,12 +5,12 @@ import Foundation
 /// Children are held in a flat array inside the owning tree and referenced by
 /// index: with millions of files, per-node object graphs cost far more ARC
 /// traffic and RAM than a struct array.
-final class FileTree {
-    struct Node {
+// ponytail: unchecked, add() is the only concurrent mutation (locked, during a scan); afterwards the main actor owns it
+final class FileTree: @unchecked Sendable {
+    struct Node: Equatable {
         var name: String
         var path: String
         var allocSize: UInt64
-        var privateSize: UInt64
         var parent: Int      // -1 for root
         var firstChild: Int   // -1 if none
         var lastChild: Int    // -1 if none
@@ -26,7 +26,7 @@ final class FileTree {
     private var lock = os_unfair_lock_s()
 
     init() {
-        nodes = [Node(name: "", path: "", allocSize: 0, privateSize: 0, parent: -1,
+        nodes = [Node(name: "", path: "", allocSize: 0, parent: -1,
                       firstChild: -1, lastChild: -1, nextSibling: -1, childCount: 0, fileCount: 0,
                       isDir: true, isAggregate: false)]
     }
@@ -43,11 +43,11 @@ final class FileTree {
 
     /// Creates a node and links it as the last child of `parent`.
     @discardableResult
-    func add(name: String, path: String, allocSize: UInt64, privateSize: UInt64 = 0,
+    func add(name: String, path: String, allocSize: UInt64,
              isDir: Bool, isAggregate: Bool = false, parent: Int) -> Int {
         os_unfair_lock_lock(&lock)
         let idx = nodes.count
-        nodes.append(Node(name: name, path: path, allocSize: allocSize, privateSize: privateSize,
+        nodes.append(Node(name: name, path: path, allocSize: allocSize,
                            parent: parent, firstChild: -1, lastChild: -1, nextSibling: -1, childCount: 0,
                            fileCount: isDir ? 0 : 1,
                            isDir: isDir, isAggregate: isAggregate))
@@ -70,15 +70,6 @@ final class FileTree {
         nodes[parent].childCount += 1
     }
 
-    var childIndices: [Int] {
-        get {
-            var out: [Int] = []
-            var c = nodes[root].firstChild
-            while c >= 0 { out.append(c); c = nodes[c].nextSibling }
-            return out
-        }
-    }
-
     func children(of index: Int) -> [Int] {
         var out: [Int] = []
         var c = nodes[index].firstChild
@@ -91,7 +82,6 @@ final class FileTree {
     func name(of index: Int) -> String { nodes[index].name }
     func path(of index: Int) -> String { nodes[index].path }
     func size(of index: Int) -> UInt64 { nodes[index].allocSize }
-    func privateSize(of index: Int) -> UInt64 { nodes[index].privateSize }
     func isDir(of index: Int) -> Bool { nodes[index].isDir }
     func isAggregate(of index: Int) -> Bool { nodes[index].isAggregate }
     func fileCount(of index: Int) -> Int { nodes[index].fileCount }
@@ -103,17 +93,14 @@ final class FileTree {
         while i >= 0 {
             if nodes[i].isDir {
                 var total: UInt64 = 0
-                var priv: UInt64 = 0
                 var files = 0
                 var c = nodes[i].firstChild
                 while c >= 0 {
                     total += nodes[c].allocSize
-                    priv += nodes[c].privateSize
                     files += nodes[c].fileCount
                     c = nodes[c].nextSibling
                 }
                 nodes[i].allocSize = total
-                nodes[i].privateSize = priv
                 nodes[i].fileCount = files
             }
             i -= 1
@@ -126,17 +113,14 @@ final class FileTree {
         while current >= 0 {
             if nodes[current].isDir {
                 var total: UInt64 = 0
-                var priv: UInt64 = 0
                 var files = 0
                 var c = nodes[current].firstChild
                 while c >= 0 {
                     total += nodes[c].allocSize
-                    priv += nodes[c].privateSize
                     files += nodes[c].fileCount
                     c = nodes[c].nextSibling
                 }
                 nodes[current].allocSize = total
-                nodes[current].privateSize = priv
                 nodes[current].fileCount = files
             }
             current = nodes[current].parent

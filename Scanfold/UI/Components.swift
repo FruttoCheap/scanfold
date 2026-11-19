@@ -73,67 +73,138 @@ struct SidebarView: View {
     }
 }
 
-/// Path breadcrumb of the current folder.
+/// Path bar of the current folder: up button, clickable breadcrumb, folder size.
 struct BreadcrumbView: View {
     let tree: FileTree
     let current: Int
-    let onNavigate: (Int) -> Void
+    let onNavigate: (Int) -> Void   // -1 = go up one level
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(Array(ancestry.enumerated()), id: \.offset) { i, node in
-                    if i > 0 {
-                        Text("›").foregroundStyle(.tertiary)
-                    }
-                    Button(action: { onNavigate(node) }) {
-                        Text(i == 0 ? (tree.name(of: node).isEmpty ? tree.path(of: node) : tree.name(of: node))
-                                    : tree.name(of: node))
-                            .lineLimit(1)
-                            .foregroundStyle(i == ancestry.count - 1 ? .primary : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
+        HStack(spacing: 8) {
+            Button { onNavigate(-1) } label: {
+                Image(systemName: "chevron.up")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 26, height: 26)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .buttonStyle(.borderless)
+            .disabled(current == tree.root)
+            .help("Go up to parent folder")
+
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(ancestry.enumerated()), id: \.offset) { i, node in
+                            if i > 0 {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            let isLast = i == ancestry.count - 1
+                            Button { onNavigate(node) } label: {
+                                Label(title(i, node), systemImage: i == 0 ? "internaldrive" : "folder")
+                                    .lineLimit(1)
+                                    .fontWeight(isLast ? .semibold : .regular)
+                                    .foregroundStyle(isLast ? .primary : .secondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(isLast ? Color.accentColor.opacity(0.15) : .clear, in: Capsule())
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .id(node)
+                        }
+                    }
+                }
+                // Deep paths: keep the current folder in view.
+                .onAppear { proxy.scrollTo(current, anchor: .trailing) }
+                .onChange(of: current) { _, new in proxy.scrollTo(new, anchor: .trailing) }
+            }
+
+            Text(VolumeInfo.fmt(tree.size(of: current)))
+                .font(.callout.weight(.semibold).monospacedDigit())
+            if tree.fileCount(of: current) > 0 {
+                Text("\(tree.fileCount(of: current).formatted()) items")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .frame(height: 30)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.bar)
     }
 
     private var ancestry: [Int] { tree.ancestry(of: current) }
+
+    private func title(_ i: Int, _ node: Int) -> String {
+        i == 0 && tree.name(of: node).isEmpty ? tree.path(of: node) : tree.name(of: node)
+    }
 }
 
-/// Volume capacity and scan stats.
+/// Disk usage summary: one capacity bar plus its legend.
 struct VolumeInfoView: View {
     let volume: VolumeInfo
     let scanned: UInt64
-    let hidden: UInt64
     let errors: Int
 
     var body: some View {
-        HStack(spacing: 20) {
-            stat("Total", volume.formattedTotal)
-            stat("Available", volume.formattedAvailable)
-            stat("Used", volume.formattedUsed)
-            stat("Purgeable", volume.formattedPurgeable)
-            stat("Scanned", VolumeInfo.fmt(scanned))
-            stat("Hidden", VolumeInfo.fmt(hidden))
-            if errors > 0 {
-                Label("\(errors) unreadable", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+        // ponytail: scanned is capped at used, so the three segments always add up to the disk size
+        let seen = min(scanned, volume.usedSpace)
+        let segments: [(title: String, bytes: UInt64, color: Color)] = [
+            ("Scanned", seen, .accentColor),
+            ("Not scanned", volume.usedSpace - seen, .gray),
+            ("Available", volume.availableCapacity, Color.secondary.opacity(0.25))
+        ]
+        let total = Double(max(volume.totalCapacity, 1))
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Storage", systemImage: "internaldrive")
+                    .font(.headline)
+                Spacer()
+                Text("\(volume.formattedUsed) of \(volume.formattedTotal) used")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    ForEach(segments.indices, id: \.self) { i in
+                        segments[i].color
+                            .frame(width: max(0, geo.size.width - 4) * Double(segments[i].bytes) / total)
+                    }
+                }
+            }
+            .frame(height: 12)
+            .clipShape(Capsule())
+
+            HStack(spacing: 18) {
+                ForEach(segments.indices, id: \.self) { i in
+                    legend(segments[i].title, segments[i].bytes, segments[i].color)
+                }
+                legend("Purgeable", volume.purgeableSpace, nil)
+                    .help("Space macOS can free on its own (caches, snapshots); counted in Used")
+                Spacer()
+                if errors > 0 {
+                    Label("\(errors) unreadable", systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
             }
         }
-        .padding(.horizontal, 12)
+        .padding(12)
         .frame(maxWidth: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func stat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.system(.body, design: .monospaced))
+    private func legend(_ title: String, _ bytes: UInt64, _ color: Color?) -> some View {
+        HStack(spacing: 6) {
+            if let color {
+                Circle().fill(color).frame(width: 8, height: 8)
+            }
+            Text(title).foregroundStyle(.secondary)
+            Text(VolumeInfo.fmt(bytes)).monospacedDigit()
         }
+        .font(.callout)
     }
 }
 
@@ -151,23 +222,16 @@ struct CollectorPanel: View {
             HStack {
                 Label("Collector", systemImage: "tray.and.arrow.down.fill")
                     .font(.headline)
-                if !items.isEmpty {
-                    Text("\(items.count) items")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(items.isEmpty ? "Drag folders here to trash them" : "\(items.count) items")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if !items.isEmpty {
                     Button("Clear", action: onClear)
                 }
             }
 
-            if items.isEmpty {
-                Text("Drag folders here to trash them")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 60)
-            } else {
+            if !items.isEmpty {
                 List {
                     ForEach(items, id: \.self) { item in
                         HStack {

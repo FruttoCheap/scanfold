@@ -31,31 +31,7 @@ struct VolumeInfo {
         )
     }
 
-    /// Local Time Machine snapshots. Deleting them needs admin, so the app
-    /// only lists them.
-    static func localSnapshots() -> [String] {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/tmutil")
-        task.arguments = ["listlocalsnapshots", "/"]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        do {
-            try task.run()
-            task.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?
-                .split(separator: "\n")
-                .map(String.init)
-                .filter { !$0.isEmpty } ?? []
-        } catch {
-            return []
-        }
-    }
-
     var formattedTotal: String { Self.fmt(totalCapacity) }
-    var formattedAvailable: String { Self.fmt(availableCapacity) }
-    var formattedPurgeable: String { Self.fmt(purgeableSpace) }
     var formattedUsed: String { Self.fmt(usedSpace) }
 
     static func fmt(_ bytes: UInt64) -> String {

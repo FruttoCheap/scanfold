@@ -22,11 +22,30 @@ struct ContentView: View {
             }
         } detail: {
             VStack(spacing: 0) {
-                if model.isScanning {
-                    ScanProgressView(progress: model.progress, onCancel: model.cancelScan)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let tree = model.tree {
-                    VStack(spacing: 6) {
+                if !model.hasDiskAccess {
+                    HStack {
+                        Label("Scanfold needs Full Disk Access to see every folder. Turn it on for Scanfold in System Settings, then reopen the app.",
+                              systemImage: "lock.shield")
+                        Spacer()
+                        Button("Open System Settings", action: model.openDiskAccessSettings)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.orange.opacity(0.15))
+                    Divider()
+                }
+
+                // Path on top, then map, collector, and the disk summary at the bottom.
+                if let tree = model.tree {
+                    BreadcrumbView(tree: tree, current: model.current) { model.navigate(to: $0) }
+                    Divider()
+                }
+
+                VStack(spacing: 8) {
+                    if model.isScanning {
+                        ScanProgressView(progress: model.progress, onCancel: model.cancelScan)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let tree = model.tree {
                         TreemapView(
                             tree: tree,
                             current: model.current,
@@ -40,58 +59,31 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                         TreemapInspectorBar(tree: tree, current: model.current, hovered: model.hoveredNode)
+                    } else {
+                        ContentUnavailableView(
+                            "No Data",
+                            systemImage: "externaldrive.badge.questionmark",
+                            description: Text("Press Scan to analyse the disk")
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .padding(8)
-                } else {
-                    ContentUnavailableView(
-                        "No Data",
-                        systemImage: "externaldrive.badge.questionmark",
-                        description: Text("Press Scan to analyse the disk")
-                    )
-                }
 
-                Divider()
-
-                if let tree = model.tree {
-                    HStack(spacing: 0) {
-                        if model.canNavigateUp {
-                            Button(action: model.navigateUp) {
-                                Image(systemName: "chevron.up")
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Go up to parent folder")
-                        }
-                        BreadcrumbView(tree: tree, current: model.current) { model.navigate(to: $0) }
+                    if let tree = model.tree {
+                        CollectorPanel(
+                            tree: tree,
+                            items: model.collected,
+                            total: model.collectedSize,
+                            onClear: model.clearCollector,
+                            onDelete: { model.showDeleteConfirmation = true },
+                            onDrop: { model.addAllToCollector($0) }
+                        )
                     }
-                    Divider()
-                }
 
-                if let volume = model.volumeInfo {
-                    VolumeInfoView(
-                        volume: volume,
-                        scanned: model.scannedSize,
-                        hidden: model.hiddenSpace,
-                        errors: model.errorCount
-                    )
-                    .padding(.vertical, 6)
+                    if let volume = model.volumeInfo {
+                        VolumeInfoView(volume: volume, scanned: model.scannedSize, errors: model.errorCount)
+                    }
                 }
-
-                Divider()
-
-                if let tree = model.tree {
-                    CollectorPanel(
-                        tree: tree,
-                        items: model.collected,
-                        total: model.collectedSize,
-                        onClear: model.clearCollector,
-                        onDelete: { model.showDeleteConfirmation = true },
-                        onDrop: { model.addAllToCollector($0) }
-                    )
-                    .padding(8)
-                }
+                .padding(8)
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
