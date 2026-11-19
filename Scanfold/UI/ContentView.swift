@@ -35,6 +35,19 @@ struct ContentView: View {
                     Divider()
                 }
 
+                if model.scanIsStale && !model.isScanning, let date = model.scanDate {
+                    HStack {
+                        Label("This scan is from \(date, style: .relative) ago and may be out of date.",
+                              systemImage: "clock.badge.exclamationmark")
+                        Spacer()
+                        Button("Scan Again", action: model.startScan)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.yellow.opacity(0.15))
+                    Divider()
+                }
+
                 // Path on top, then map, collector, and the disk summary at the bottom.
                 if let tree = model.tree {
                     BreadcrumbView(tree: tree, current: model.current) { model.navigate(to: $0) }
@@ -60,11 +73,11 @@ struct ContentView: View {
 
                         TreemapInspectorBar(tree: tree, current: model.current, hovered: model.hoveredNode)
                     } else {
-                        ContentUnavailableView(
-                            "No Data",
-                            systemImage: "externaldrive.badge.questionmark",
-                            description: Text("Press Scan to analyse the disk")
-                        )
+                        Button(action: model.startScan) {
+                            Text("Scan").font(.largeTitle).padding(.horizontal, 24)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.extraLarge)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
 
@@ -87,15 +100,7 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    if model.isScanning {
-                        Button(action: model.cancelScan) {
-                            Label("Stop", systemImage: "stop.fill")
-                        }
-                    } else {
-                        Button(action: model.startScan) {
-                            Label("Scan", systemImage: "magnifyingglass")
-                        }
-                    }
+                    Button(model.isScanning ? "Stop" : "Scan", action: model.isScanning ? model.cancelScan : model.startScan)
                 }
             }
         }

@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var progress: Scanner.Progress?
     @Published private(set) var errorCount = 0
     @Published private(set) var volumeInfo: VolumeInfo?
+    @Published private(set) var scanDate: Date?
     @Published var hoveredNode: Int?
     @Published var collected: [Int] = []
     @Published var showDeleteConfirmation = false
@@ -28,6 +29,7 @@ final class AppModel: ObservableObject {
             self.tree = cached.tree
             self.current = cached.tree.root
             self.errorCount = cached.errorCount
+            self.scanDate = cached.date
             self.revision = 1
         }
     }
@@ -66,6 +68,7 @@ final class AppModel: ObservableObject {
             self.errorCount = result.errors
             self.isScanning = false
             self.revision += 1
+            self.scanDate = .now
             ScanStorage.save(tree: result.tree, errorCount: result.errors)
         }
     }
@@ -97,6 +100,11 @@ final class AppModel: ObservableObject {
         } else {
             quickLook(index)
         }
+    }
+
+    // ponytail: fixed one-week threshold, checked on each redraw; add a setting if users want a different age
+    var scanIsStale: Bool {
+        scanDate.map { Date.now.timeIntervalSince($0) > 7 * 86_400 } ?? false
     }
 
     // MARK: - Volume
@@ -163,7 +171,7 @@ final class AppModel: ObservableObject {
         self.revision += 1
         collected = []
         if !deleted.isEmpty {
-            ScanStorage.save(tree: tree, errorCount: self.errorCount)
+            ScanStorage.save(tree: tree, errorCount: self.errorCount, date: scanDate ?? .now)   // a delete must not make an old scan look fresh
         }
     }
 }
